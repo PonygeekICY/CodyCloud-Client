@@ -15,19 +15,20 @@ It is build for a better managing of NGROK_Server
 
 ## Config File Example (configs/codycloud.json)
 >{  
->  "ngrok_servers": {  
->    "ngrokd_ebian": {  
->      "domain": "codos.club",  
->      "http_port": "8080",  
->      "tunnel_addr": "4440",  
->      "log_path": "logs/ngrokd/ebian/ngrokd.log",  
->      "log_level": "ERROR"  
->    }  
->  },  
->  "codycloud_server_port": 2220,  
->  "max_con": 10,  
->  "log_level": "DEBUG",  
->  "base_key": "CodyCloudBasicLiveKey"  
+  "ngrok_clients":{  
+    "ebian_ngrok":{  
+      "log_level":"ERROR",  
+      "log_path":"logs/ngrok/ebian/ngrok.log",  
+      "tunnels":{  
+        "ssh":2200  
+      },  
+      "config_path":"configs/ebian_ngrok.cfg"  
+    }  
+  },  
+  "server_addr":"example.com",  
+  "server_port":2220,  
+  "log_level":"DEBUG",  
+  "base_key":"BasicLiveKey"  
 >}  
 
 ## How to stop this service
