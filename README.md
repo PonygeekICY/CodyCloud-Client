@@ -5,7 +5,7 @@ It is build for a better managing of NGROK_Server
 * python3 main.py &  
 * nohup python3 main.py &  
 * (or like this if you just used the "setup.py" installer)  
-  service codycloud start  
+  service codyclient start  
 
 ## How to Setup
 - make sure you have a ***ngrok client*** exe in ***./bin*** folder(creat a ***./bin*** folder if it dosen't exist)
