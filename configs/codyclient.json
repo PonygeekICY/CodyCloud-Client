@@ -1,0 +1,16 @@
+{
+  "ngrok_clients":{
+    "ebian_ngrok":{
+      "log_level":"ERROR",
+      "log_path":"logs/ngrok/ebian/ngrok.log",
+      "tunnels":{
+        "ssh":2200
+      },
+      "config_path":"configs/ebian_ngrok.cfg"
+    }
+  },
+  "server_addr":"codos.club",
+  "server_port":2220,
+  "log_level":"DEBUG",
+  "base_key":"CodyCloudBasicLiveKey"
+}
