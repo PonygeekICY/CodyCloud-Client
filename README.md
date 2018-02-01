@@ -8,7 +8,7 @@ It is build for a better managing of NGROK_Server
   service codycloud start  
 
 ## How to Setup
-- make sure you have a ***ngrok client*** exe in ***./bin"*** folder(creat a ***./bin*** folder if it dosen't exist)
+- make sure you have a ***ngrok client*** exe in ***./bin*** folder(creat a ***./bin*** folder if it dosen't exist)
 - make sure you have edited a ***config file*** of ***ngrok client*** 
 - make sure you have edited the ***configs/codyclient.json*** correctly
 - run "setup.py" file as root user acount and follow the step
