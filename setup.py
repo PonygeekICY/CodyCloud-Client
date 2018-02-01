@@ -9,36 +9,36 @@ def echo(msg):
 def service_gen(file_path):
     cs = """#!/bin/sh
 ### BEGIN INIT INFO
-# Provides:             cody_client
+# Provides:             cody_cloud
 # Required-Start:       $local_fs $remote_fs $network $syslog $named
 # Required_Stop:        $local_fs $remote_fs $network $syslog $named
 # Default-Start:        2 3 4 5
 # Default-Stop:         0 1 6
-# Short-Description:    CodyCloud client
-# Description:          CodyCloud Ngrok Manager Client
+# Short-Description:    CodyCloud Server
+# Description:          CodyCloud Ngrok Manager Server
 ### END INIT INFO
 
-codyclient_path="""
+codycloud_path="""
     path = sys.path[0]
     cs = cs + path
     cs = cs + """
 
 do_start()
 {
-    cd ${codyclient_path}
+    cd ${codycloud_path}
     python3 main.py &
 }
 
 do_stop()
 {
-    echo "">${codyclient_path}/cache/CMD_STOP
+    echo "">${codycloud_path}/cache/CMD_STOP
     while(($wait<50))
     do
         sleep 0.2
         wait=$(($wait+1))
-        if [ -f ${codyclient_path}/cache/FB_STOPPED ]
+        if [ -f ${codycloud_path}/cache/FB_STOPPED ]
         then
-            echo "CodyClient Stopped" >&2
+            echo "CodyCloud Stopped" >&2
             break
         fi
     done
@@ -77,21 +77,21 @@ def main():
     temp = input("")
     if temp != "y":
         sys.exit(1)
-    echo("Exporting codyclient.service")
-    service_gen("/etc/init.d/codyclient")
+    echo("Exporting codycloud.service")
+    service_gen("/etc/init.d/codycloud")
     echo("Changing file mode to EXECUTABLE")
-    os.system("chmod +x /etc/init.d/codyclient")
+    os.system("chmod +x /etc/init.d/codycloud")
     echo("Registing service to defaults")
-    os.system("update-rc.d codyclient defaults")
+    os.system("update-rc.d codycloud defaults")
     echo("Installation compeleted, run a simple test? (input \"y\" for yes, else to exit)")
     temp = input("")
     if temp != "y":
         sys.exit(0)
-    os.system("service codyclient start")
+    os.system("service codycloud start")
     echo("Service started")
     time.sleep(1)
     echo("Stopping service")
-    os.system("service codyclient stop")
+    os.system("service codycloud stop")
     n = 0
     while not os.path.exists("cache/FB_STOPPED"):
         time.sleep(0.5)
@@ -100,7 +100,7 @@ def main():
             echo("Stop_test timeout")
             break
     echo("Catching log")
-    os.system("cat logs/codyclient.log")
+    os.system("cat logs/codycloud.log")
     echo("Test end")
     sys.exit(0)
 
