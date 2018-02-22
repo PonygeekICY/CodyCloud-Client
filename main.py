@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
-# Name: CodyCloud Ngrok Server
+# Name: Cody Ngrok Client Service
 # Author: Icy(enderman1024@foxmail.com)
 # OS: Linux
 
@@ -9,20 +9,20 @@ import time, socket, threading, os, sys, json
 
 
 
-def init():
-	global LOGGER, KEY, STOP
+def init(): # initializer
+	global LOGGER, KEY, STOP, NGROK_SERVICE
 	paths = ("./bin/","./cache/","./configs/","./logs/")
 	for i in paths:
 		path_fixer(i)
 	try:
-		configs = read_config("./configs/codycloud.json")
+		configs = read_config("./configs/codyclient.json")
 	except Exception as err:
 		print("INITIALIZE FAILED: " + str(err))
 		sys.exit(1)
 	log_level = "INFO"
 	if "log_level" in configs:
 		log_level = configs["log_level"]
-	LOGGER = logger("./logs/codycloud.log","crlf","%Y-%m-%d %H:%M:%S",log_level)
+	LOGGER = logger("./logs/codyclient.log","crlf","%Y-%m-%d %H:%M:%S",log_level)
 	LOGGER.INFO("[Main] Initilizing...")
 	os.chdir(sys.path[0])
 	LOGGER.DEBUG("[Main] Path check: OK")
@@ -36,7 +36,6 @@ def init():
 	# global tags
 	STOP = False
 	NGROK_SERVICE = False
-	CODYCLOUD_SERVER = False
 	LOGGER.DEBUG("[Main] Global tags define: OK")
 	LOGGER.INFO("[Main] Initialized")
 
@@ -143,6 +142,10 @@ class iccode: # Simple Data encoder/decoder
 		self.key = self.origin_ickey
 		self.walk = 0
 	def debug(self):
+		print("Original   key: " + str(self.origin_key))
+		print("Original ickey: " + str(self.origin_ickey))
+		print("Step     ickey: " + str(self.key))
+		print("Walk    cursor: " + str(self.walk))
 		return (self.origin_key,self.origin_ickey,self.key,self.walk)
 
 
@@ -301,31 +304,11 @@ def keygen(code,mt): # Live key generator
 
 
 
-def keymatch(key): # Live key matcher
-	global KEY
-	lock_1 = keygen(KEY,-1)
-	lock_2 = keygen(KEY,0)
-	lock_3 = keygen(KEY,1)
-	lock = [lock_1,lock_2,lock_3]
-	if key in lock:
-		return True
-	else:
-		return False
-
-
-
-
-def get_args(): # read command shell's argument(s)
-	opts = sys.argv[1:]
-	argv = ""
-	res = {}
-	for i in opts:
-		if len(argv) > 0 and "-" != i[0]:
-			res.update({argv:i})
-			argv = ""
-		if "-" == i[0]:
-			argv = i
-			res.update({argv:""})
+def bin2str(data): # transform bin data to string
+	try:
+		res = data.decode()
+	except:
+		res = str(data)
 	return res
 
 
@@ -339,224 +322,181 @@ def read_config(file): # Json Config Reader
 
 
 
-def run_ngrokd(path,config): # run ngrok server file (sub thread)
-	cmd = "./bin/" + path
-	for i in config:
-		if i == "domain":
-			cmd += " -domain=\"" + config["domain"] + "\""
-		elif i == "http_port":
-			cmd += " -httpAddr=\":" + config["http_port"] + "\""
-		elif i == "tunnel_addr":
-			cmd += " -tunnelAddr=\":" + config["tunnel_addr"] + "\""
-		elif i == "log_path":
-			cmd += " -log \"" + config["log_path"] + "\""
-		elif i == "log_level":
-			cmd += " -log-level " + config["log_level"]
-	LOGGER.DEBUG("[NgrokThread] Command generated: " + cmd)
+def codycloud_cloudcheck(host,check_port): # cody cloud status check service (sub thread)
+	LOGGER.DEBUG("[CloudCheck] Running cloud check program")
+	coder = iccode(KEY)
+	clt = isock()
+	clt.settimeout(15)
+	LOGGER.DEBUG("[CloudCheck] TCP Socket initialized, connecting to " + host[0] + ":" + str(host[1]))
+	status = clt.connect(host)
+	if not status[0]:
+		LOGGER.WARNING("[CloudCheck] Failed to connecting to server, result:" + str(status[1]))
+		clt.close()
+		return 2
+	else:
+		LOGGER.DEBUG("[CloudCheck] Server connected, sending live key")
+	status = clt.send(coder.encode(keygen(KEY,0)))
+	coder.reset()
+	if not status[0]:
+		LOGGER.WARNING("[CloudCheck] Failed to send live key, result:" + status[1])
+		clt.close()
+		return 2
+	else:
+		pass
+	status = clt.recv(16)
+	if not status[0]:
+		LOGGER.WARNING("[CloudCheck] Failed to receive data, result:" + status[1])
+		clt.close()
+		return 2
+	else:
+		data = coder.decode(status[1])
+		coder.reset()
+	if data == b"OK":
+		LOGGER.DEBUG("[CloudCheck] Live key matched")
+	else:
+		LOGGER.WARNING("[Cloudcheck] Live key match failed, data received:" + bin2str(status[1]))
+		clt.close()
+		return 3
+	status = clt.send(coder.encode(check_port.encode()))
+	coder.reset()
+	if not status[0]:
+		LOGGER.WARNING("[CloudCheck] Failed to send check request, result:" + status[1])
+		clt.close()
+		return 2
+	else:
+		pass
+	status = clt.recv(16)
+	if not status[0]:
+		LOGGER.WARNING("[CloudCheck] Failed to receive status feedback, result:" + status[1])
+	else:
+		data = coder.decode(status[1])
+	if data == b"OP":
+		LOGGER.DEBUG("[CloudCheck] Port " + check_port + " is OPEN")
+		clt.close()
+		return 0
+	elif data == b"CL":
+		LOGGER.WARNING("[CloudCheck] Port " + check_port + " is CLOSE")
+		clt.close()
+		return 1
+	else:
+		LOGGER.WARNING("[CloudCheck] Unexpected data: " + bin2str(status[1]))
+		clt.close()
+		return 3
+
+
+
+
+def ngrok_client(name,configs): # ngrok client thread (sub thread)
+	os.system("killall " + name)
 	try:
+		log_path = False
+		log_level = "INFO"
+		cmd = "./bin/" + name + " -config "
+		if "log_path" in configs:
+			log_path = configs["log_path"]
+		if "log_level" in configs:
+			log_level = configs["log_level"]
+		tunnels = configs["tunnels"]
+		config_path = configs["config_path"]
+		cmd = cmd + config_path + " "
+		if log_path:
+			cmd = cmd + "-log " + log_path + " -log-level " + log_level + " "
+		cmd = cmd + "start"
+		for i in tunnels:
+			cmd = cmd + " " + i
+		LOGGER.DEBUG("[NgrokClient] Command generated: " + cmd)
 		os.system(cmd)
-	except Exception as err:
-		LOGGER.WARNING("[NgrokThread] NGROK server(\"" + path + "\")stopped, result: " + str(err))
+	except Exception:
+		LOGGER.WARNING("[NgrokClient] Failed to start ngrok client(" + name + "), result:" + str(err))
+		sys.exit(1)
 
 
 
-
-def ngrokd_server(): # ngrok control server loop (thread)
-	global NGROK_SERVICE, STOP
+def ngrok_client_service(): # ngrok client controller (thread)
+	global STOP, NGROK_SERVICE
 	NGROK_SERVICE = True
 	LOGGER.DEBUG("[NgrokService] Loading configs")
 	try:
-		configs = read_config("./configs/codycloud.json")
+		configs = read_config("./configs/codyclient.json")
 	except Exception as err:
-		LOGGER.CRITICAL("[NgrokService] Can't open(or missing) \"codycloud.json\" config file")
+		LOGGER.CRITICAL("[NgrokService] Can't open(or missing) \"codyclient.json\" config file")
 		STOP = True
 		sys.exit(1)
-	ngrok_configs = configs["ngrok_servers"]
-	threads = []
-	for i in ngrok_configs:
-		temp = ngrok_configs[i]
-		if "log_path" in temp:
-			LOGGER.DEBUG("[NgrokService] Checking " + i + " log path")
-			path_fixer(temp["log_path"])
-		ngrokd_thread = threading.Thread(target=run_ngrokd,args=(i,temp))
-		ngrokd_thread.start()
-		LOGGER.INFO("[NgrokService] MGROK server \"" + i + "\" thread has been started")
-		if not "tunnel_addr" in temp:
-			threads.append((i,4443))
-		else:
-			threads.append((i,int(temp["tunnel_addr"])))
-	LOGGER.DEBUG("[NgrokService] Server detecting loop starting")
-	temp = 0
+	try:
+		server_addr = configs["server_addr"]
+		server_port = configs["server_port"]
+		ngrok_clients = configs["ngrok_clients"]
+		ngrok_log_paths = []
+		for i in ngrok_clients:
+			ngrok_log_paths.append((ngrok_clients[i])["log_path"])
+		for i in ngrok_log_paths:
+			path_fixer(i)
+	except Exception as err:
+		LOGGER.ERROR("[NgrokService] Failed while reading config file, result:" + str(err))
+		STOP = True
+		sys.exit(1)
+	LOGGER.INFO("[NgrokService] Starting ngrok clients")
+	ngrok_error = {}
+	for i in ngrok_clients:
+		ngrok_error.update({i:0})
+		try:
+			ngrok_thread = threading.Thread(target=ngrok_client, args=(i,ngrok_clients[i]))
+			ngrok_thread.start()
+		except Exception as err:
+			LOGGER.ERROR("[NgrokService] Can't start ngrok_client(" + i + ") thread, result: " + str(err))
+	LOGGER.INFO("[NgrokService] Starting ngrok client cloud check service")
+	tick = 50
 	while True:
 		time.sleep(1)
-		temp += 1
+		tick += 1
 		if STOP:
-			LOGGER.INFO("[NgrokService] Stopping Ngrok Service")
-			for i in threads:
-				LOGGER.DEBUG("[NgrokService] Sending kill signal to \"" + i[0] + "\"")
-				os.system("killall \"" + i[0] + "\"")
-			LOGGER.INFO("[NgrokService] Ngrok Service stopped")
-			NGROK_SERVICE = False
-			return
-		if temp >= 120:
-			test = isock()
-			test.settimeout(5)
-			LOGGER.DEBUG("[NgrokService] Testing ngrok server connections")
-			for i in threads:
-				temp = test.connect(("localhost",i[1]))
-				if temp[0]:
-					LOGGER.DEBUG("[NgrokService] Ngrok server \"" + i[0] + "\" : OK")
-					test.close()
+			LOGGER.INFO("[NgrokService] Stopping ngrok clients")
+			for i in ngrok_clients:
+				LOGGER.DEBUG("[NgrokService] Sending kill signal to \"" + i + "\"")
+				status = os.system("killall " + i)
+				if status != 0:
+					LOGGER.WARNING("[NgrokService] Failed to kill \"" + i + "\", system feedback code: " + str(status))
 				else:
-					LOGGER.WARNING("[NgrokService] Ngrok server \"" + i[0] + "\" : NO RESPONSE")
-					LOGGER.INFO("[NgrokService] Restarting " + i[0])
-					temp = ngrok_configs[i[0]]
-					ngrokd_thread = threading.Thread(target=run_ngrokd,args=(i[0],temp))
-					ngrokd_thread.start()
-			temp = 0
-
-
-
-
-def bin2str(data): # transform bin data to string
-	try:
-		res = data.decode()
-	except:
-		res = str(data)
-	return res
-
-
-
-
-def codycloud_clientHandler(clt,con): # CodyCloud Client Handler (sub thread)
-	clt.settimeout(15)
-	LOGGER.INFO("[CCClientHandler] Connection " + str(con[0]) + ":" + str(con[1]) + " handled")
-	try:
-		LOGGER.DEBUG("[CCClientHandler] Waitting to match coming key")
-		data = clt.recv(128)
-		LOGGER.DEBUG("[CCClientHandler] Data received: " + bin2str(data))
-	except Exception as err:
-		LOGGER.ERROR("[CCClientHandler] Error while waitting for respons: " + str(err))
-	coder = iccode(KEY)
-	LOGGER.DEBUG("[CCClientHandler] Coder initialized, key: " + str((coder.debug())[1]))
-	key = coder.decode(data)
-	coder.reset()
-	res = keymatch(key)
-	if res:
-		LOGGER.DEBUG("[CCClientHandler] Live key matched, sending feedback")
-	else:
-		LOGGER.WARNING("[CCClientHandler] Live key match failed, data received: " + bin2str(data) + "(" + str(con[0]) + ":" + str(con[1]) + "). Closing connection.")
-		clt.close()
-		return
-	try:
-		clt.send(coder.encode(b"OK"))
-	except Exception as err:
-		LOGGER.ERROR("[CCClientHandler] Failed to send feedbaxk, result: " + str(err) + ". Closing connection")
-		clt.close()
-		return
-	LOGGER.DEBUG("[CCClientHandler] Waitting for respons")
-	try:
-		data = clt.recv(1024)
-	except Exception as err:
-		LOGGER.ERROR("[CCClientHandler] Failed to receive message, result: " + str(err) + ". Closing connection")
-		clt.close()
-		return
-	coder.reset()
-	data = coder.decode(data)
-	try:
-		data = int(data)
-	except:
-		pass
-	if data in range(65536):
-		pass
-	else:
-		LOGGER.WARNING("[CCClientHandler] Unexpected data: " + bin2str(data) + ". Closing connection")
-		clt.close()
-		return
-	LOGGER.DEBUG("[CCClientHandler] Request received: port " + str(data))
-	socket = isock()
-	socket.settimeout(5)
-	LOGGER.DEBUG("[CCClientHandler] Testing port " + str(data))
-	res = socket.connect(("localhost",data))
-	if res[0]:
-		LOGGER.INFO("[CCClientHandler] Port " + str(data) + " is OPEN, sending feedback")
-		socket.close()
-		coder.reset()
-		try:
-			clt.send(coder.encode(b"OP"))
-		except Exception as err:
-			LOGGER.ERROR("[CCClientHandler] Failed to send feedback, result: " + str(err) + ". Closing connection")
-			clt.close()
-			return
-	else:
-		LOGGER.DEBUG("[CCClientHandler] Port " + str(data) + " is CLOSE, sending feedback")
-		coder.reset()
-		try:
-			clt.send(coder.encode(b"CL"))
-		except Exception as err:
-			LOGGER.ERROR("[CCClientHandler] Failed to send feedback, result: " + str(err) + ". Closing connection")
-			clt.close()
-			return
-	clt.close()
-	LOGGER.DEBUG("[CCClientHandler] Connection closed, handler thread end")
-	return
-
-
-
-
-def codycloud_socketServer(): # codycloud server (thread)
-	global CODYCLOUD_SERVER, STOP
-	CODYCLOUD_SERVER = True
-	LOGGER.DEBUG("[CodyCloudServer] Loading configs")
-	try:
-		configs = read_config("./configs/codycloud.json")
-	except Exception as err:
-		LOGGER.CRITICAL("[CodyCloudServer] Can't open(or missing) \"codycloud.json\" config file")
-		STOP = True
-		sys.exit(1)
-	max_con = 10
-	port = 2220
-	if "max_con" in configs:
-		max_con = configs["max_con"]
-	if "codycloud_server_port" in configs:
-		port = configs["codycloud_server_port"]
-	srv = isock()
-	temp = srv.build_server(("0.0.0.0",port),max_con)
-	if not temp[0]:
-		LOGGER.ERROR("[CodyCloudServer] Error while starting codycloud server, result: " + temp[1])
-	else:
-		LOGGER.INFO("[CodyCloudServer] CodyCloud is now listening on 0.0.0.0:" + str(port) + " with max connection number of " + str(max_con))
-	error = 0
-	while True:
-		host = srv.accept()
-		if not host[0]:
-			if error >= 10:
-				LOGGER.CRITICAL("[CodyCloudServer] Too many errors, exitting")
-				STOP = True
-				return
-			LOGGER.ERROR("[CodyCloudServer] Socket server error: " + host[1])
-			error += 1
-			continue
-		error = 0
-		host = host[1]
-		if STOP:
-			LOGGER.INFO("[CodyCloudServer] Stopping codycloud server")
-			host[0].close()
-			LOGGER.DEBUG("[CodyCloudServer] Connection closed")
-			temp = srv.close()
-			if not temp[0]:
-				LOGGER.WARNING("[CodyCloudServer] Failed to close socket server, result: " + temp[1])
-			else:
-				LOGGER.DEBUG("[CodyCloudServer] Socket server closed")
-			LOGGER.INFO("[CodyCloudServer] CodyCloud server stopped")
-			CODYCLOUD_SERVER = False
-			return
-		handler_thread = threading.Thread(target=codycloud_clientHandler,args=host)
-		try:
-			handler_thread.start()
-		except Exception as err:
-			LOGGER.ERROR("[CodyCloudServer] Failed to start a handler thread, result: " + str(err))
-			host[0].close()
+					pass
+			LOGGER.INFO("[NgrokService] NgrokService stopped")
+			NGROK_SERVICE = False
+			sys.exit(0)
+		if tick >= 60:
+			tick = 0
+			for i in ngrok_clients:
+				if ngrok_error[i] == 5:
+					LOGGER.WARNING("[NgrokService] Ngrok client \"" + i + "\" has too many error, tagging into skip list")
+					ngrok_error.update({i:6})
+					continue
+				elif ngrok_error[i] >= 6:
+					LOGGER.DEBUG("[NgrokService] Skipping ngrok client \"" + i + "\"")
+					continue
+				LOGGER.DEBUG("[NgrokService] Checking ngrok client \"" + i + "\"")
+				error_port = 0
+				net_error = 0
+				for i2 in (ngrok_clients[i])["tunnels"]:
+					status = codycloud_cloudcheck((server_addr,server_port),str(((ngrok_clients[i])["tunnels"])[i2]))
+					if status == 0:
+						LOGGER.DEBUG("[NgrokService] Cloud check port(" + i + "): " + str(((ngrok_clients[i])["tunnels"])[i2]) + "(" + i2 + ") status: OK")
+						ngrok_error.update({i:0})
+						net_error = 0
+					elif status == 1:
+						LOGGER.WARNING("[NgrokService] Cloud check port(" + i + "): " + str(((ngrok_clients[i])["tunnels"])[i2]) + "(" + i2 + ") status: CLOSED")
+						error_port += 1
+					elif status == 2:
+						LOGGER.ERROR("[NgrokService] Cloud check server error, unexpected server or network error")
+					else:
+						LOGGER.ERROR("[NgrokService] Cloud check failed, server_addr, server_port or base_key maybe incorrect")
+						net_error += 1
+						time.sleep(net_error*5)
+					if error_port > 0:
+						LOGGER.INFO("[NgrokService] Restarting ngrok client \"" + i + "\"")
+						ngrok_error.update({i:ngrok_error[i]+1})
+						try:
+							ngrok_thread = threading.Thread(target=ngrok_client, args=(i,ngrok_clients[i]))
+							ngrok_thread.start()
+						except Exception as err:
+							LOGGER.ERROR("[NgrokService] Can't start ngrok_client(" + i + ") thread, result: " + str(err))
 
 
 
@@ -564,88 +504,61 @@ def codycloud_socketServer(): # codycloud server (thread)
 def stop_service(): # stopping service (main)
 	global STOP
 	LOGGER.INFO("[StopService] Stopping Service is now listening for stopping signal")
-	try:
-		configs = read_config("./configs/codycloud.json")
-	except:
-		configs = {}
+	temp = 0
 	try:
 		while True:
 			time.sleep(2)
 			signal = os.path.exists("cache/CMD_STOP")
 			if signal or STOP:
 				STOP = True
-				LOGGER.INFO("[StopService] Stopping signal detected, stopping CodyCloud")
-				socket = isock()
-				port = 2220
-				if "codycloud_server_port" in configs:
-					port = configs["codycloud_server_port"]
-				socket.settimeout(5)
-				socket.connect(("localhost",port))
-				socket.close()
-				temp = 0
+				LOGGER.INFO("[StopService] Stopping signal detected, stopping CodyClient")
 				while True:
 					time.sleep(1)
 					temp += 1
-					if temp >= 120:
+					if temp >= 10:
 						if NGROK_SERVICE:
 							LOGGER.WARNING("[StopService] Ngrok Service thread has no response, stopping failed")
 							break
-						if CODYCLOUD_SERVER:
-							LOGGER.WARNING("[StopService] CodyCloud Server thread has no response, stopping failed")
-							break
 					else:
-						if NGROK_SERVICE == False and CODYCLOUD_SERVER == False:
+						if NGROK_SERVICE == False:
+							time.sleep(5)
 							LOGGER.INFO("[StopService] All main threads stopped")
 							break
 				LOGGER.DEBUG("[StopService] Releasing Stopped signal file")
 				file = open("cache/FB_STOPPED","w")
 				file.write("stopped")
 				file.close()
-				LOGGER.INFO("[StopService] CodyCloud stopped")
+				LOGGER.INFO("[StopService] CodyClient stopped")
 				return
 	except KeyboardInterrupt:
 		STOP = True
-		LOGGER.INFO("[StopService] Stopping signal detected, stopping CodyCloud")
-		socket = isock()
-		port = 2220
-		if "codycloud_server_port" in configs:
-			port = configs["codycloud_server_port"]
-		socket.settimeout(5)
-		socket.connect(("localhost",port))
-		socket.close()
-		temp = 0
+		LOGGER.INFO("[StopService] Stopping signal detected, stopping CodyClient")
 		while True:
 			time.sleep(1)
 			temp += 1
-			if temp >= 120:
+			if temp >= 10:
 				if NGROK_SERVICE:
 					LOGGER.WARNING("[StopService] Ngrok Service thread has no response, stopping failed")
 					break
-				if CODYCLOUD_SERVER:
-					LOGGER.WARNING("[StopService] CodyCloud Server thread has no response, stopping failed")
-					break
 			else:
-				if NGROK_SERVICE == False and CODYCLOUD_SERVER == False:
+				if NGROK_SERVICE == False:
+					time.sleep(1)
 					LOGGER.INFO("[StopService] All main threads stopped")
 					break
 		LOGGER.DEBUG("[StopService] Releasing Stopped signal file")
 		file = open("cache/FB_STOPPED","w")
 		file.write("stopped")
 		file.close()
-		LOGGER.INFO("[StopService] CodyCloud stopped")
+		LOGGER.INFO("[StopService] CodyClient stopped")
 		return
 
 
 
-
-def main():
+def main(): # main thread tree (main)
 	init()
 	LOGGER.DEBUG("[Main] Starting Ngrok Service")
-	ngrok_service_thread = threading.Thread(target=ngrokd_server,args=())
+	ngrok_service_thread = threading.Thread(target=ngrok_client_service,args=())
 	ngrok_service_thread.start()
-	LOGGER.DEBUG("[Main] Starting CodyCloud SocketServer")
-	codycloud_thread = threading.Thread(target=codycloud_socketServer,args=())
-	codycloud_thread.start()
 	LOGGER.DEBUG("[Main] Starting main thread control service")
 	stop_service()
 	sys.exit(0)
@@ -653,5 +566,5 @@ def main():
 
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
 	main()
