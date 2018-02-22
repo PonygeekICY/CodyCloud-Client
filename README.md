@@ -14,7 +14,8 @@ It is build for a better managing of NGROK_Server
 - run "setup.py" file as root user acount and follow the step
 
 ## Config File Example (configs/codycloud.json)
->{  
+~~~
+{  
   "ngrok_clients":{  
     "ebian_ngrok":{  
       "log_level":"ERROR",  
@@ -30,6 +31,7 @@ It is build for a better managing of NGROK_Server
   "log_level":"DEBUG",  
   "base_key":"BasicLiveKey"  
 >}  
+~~~
 
 ## How to stop this service
 - Create a file named **"CMD_STOP"** in the **"cache"** folder
